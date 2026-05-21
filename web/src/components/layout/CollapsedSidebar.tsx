@@ -24,6 +24,7 @@ import {
   ShareAndroid,
   Shield,
   SidebarExpand,
+  TaskList,
   Terminal,
 } from "iconoir-react";
 
@@ -43,10 +44,11 @@ const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
+  issues: ClipboardCheck,
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
-  requests: ClipboardCheck,
+  requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
   calendar: Calendar,
