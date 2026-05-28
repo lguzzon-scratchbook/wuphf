@@ -386,11 +386,42 @@ func Shred(ctx context.Context, name string, permanent bool) (string, error) {
 		return "", ErrWorkspaceNotFound
 	}
 
-	// Refuse to shred a running workspace. Deleting the runtime tree while the
-	// broker holds open files and sockets leaves a zombie process and can cause
-	// AllocatePortPair to hand the same ports to a new workspace immediately.
+	// Auto-pause a running workspace before shredding. Deleting the runtime
+	// tree while the broker holds open files and sockets leaves a zombie
+	// process and can cause AllocatePortPair to hand the same ports to a new
+	// workspace immediately. Pause's SIGTERM/SIGKILL ladder is the same
+	// machinery the explicit `wuphf workspace pause` path runs; surfacing it
+	// behind shred keeps the UX promise that a confirmed shred actually
+	// teardown everything (process + port + tree).
 	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
-		return "", fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
+		// Detach Pause from the caller's context. A canceled request (browser
+		// tab closed, network hiccup) mid-teardown would abort Pause inside
+		// its SIGTERM/SIGKILL poll loop and leave the workspace in
+		// StateStopping with the broker still alive — exactly the half-dead
+		// state this auto-pause exists to prevent. The bounded timeout still
+		// caps how long Pause can hang; it just doesn't ride on ctx.
+		pauseCtx, cancel := context.WithTimeout(context.Background(), pauseWallClockTimeout+15*time.Second)
+		err := Pause(pauseCtx, name)
+		cancel()
+		if err != nil {
+			return "", fmt.Errorf("workspaces: shred %q: pause running broker: %w", name, err)
+		}
+		// Re-read the registry so target reflects the post-pause state
+		// (BrokerPort is stable, but State moved Running → Paused).
+		reg, err = Read()
+		if err != nil {
+			return "", err
+		}
+		target = nil
+		for _, ws := range reg.Workspaces {
+			if ws.Name == name {
+				target = ws
+				break
+			}
+		}
+		if target == nil {
+			return "", ErrWorkspaceNotFound
+		}
 	}
 
 	// Token file and the ~/.wuphf compatibility symlink live at the real user
