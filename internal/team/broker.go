@@ -134,6 +134,7 @@ type Broker struct {
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
+	obsidianWatcher         *ObsidianWatcher
 	demandIndex             *NotebookDemandIndex
 	channelIntentDispatcher *ChannelIntentDispatcher
 	promotionSweep          *PromotionSweep
@@ -698,6 +699,21 @@ func (b *Broker) Stop() {
 			close(b.stopCh)
 		})
 	}
+
+	// Snapshot the obsidian watcher and stop it BEFORE cancelling the
+	// lifecycle context. The watcher has trailing-edge debounce timers
+	// that fire callbacks via time.AfterFunc; those callbacks call
+	// Repo.Commit with the lifecycle context, so cancelling first would
+	// drop in-flight Obsidian-side edits at the commit step. The watcher's
+	// own Stop drains pending timers + commit goroutines under the
+	// pending WaitGroup, so this is the only correct order.
+	b.mu.Lock()
+	obsidianWatcher := b.obsidianWatcher
+	b.mu.Unlock()
+	if obsidianWatcher != nil {
+		_ = obsidianWatcher.Stop()
+	}
+
 	if b.lifecycleCancel != nil {
 		b.lifecycleCancel()
 	}
