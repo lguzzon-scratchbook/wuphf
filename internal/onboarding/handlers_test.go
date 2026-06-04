@@ -101,6 +101,64 @@ func TestHandleAnswerPersistsTaskPrompt(t *testing.T) {
 	})
 }
 
+func TestHandleAnswerPersistsOwnerEmail(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":"  maya@nex.ai  "}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.OwnerEmail != "maya@nex.ai" {
+			t.Fatalf("owner email = %q, want %q", s.FormAnswers.OwnerEmail, "maya@nex.ai")
+		}
+	})
+}
+
+func TestHandleAnswerRejectsNonStringOwnerEmail(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		// Seed a valid email first.
+		seed := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":"maya@nex.ai"}`)),
+		)
+		HandleAnswer(httptest.NewRecorder(), seed)
+
+		// A non-string payload must be rejected with 400, not coerced to "".
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":123}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+		// The previously stored value must survive the rejected request.
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.OwnerEmail != "maya@nex.ai" {
+			t.Fatalf("owner email was clobbered: got %q, want %q", s.FormAnswers.OwnerEmail, "maya@nex.ai")
+		}
+	})
+}
+
 func TestHandleAnswerRejectsEmptyTaskPrompt(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		req := httptest.NewRequest(
