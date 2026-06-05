@@ -708,16 +708,18 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	shareController := newWebShareController(webPort)
 	tunnelController := newWebTunnelController()
 
-	// Clean up tunnel/share subprocesses when the process receives SIGINT or
-	// SIGTERM. Without this, cloudflared is left running as an orphan after
-	// Ctrl+C — especially problematic on Windows where child processes are not
-	// automatically reaped.
+	// Clean up tunnel/share subprocesses, the launcher (headless workers,
+	// broker, per-agent temp files), and then exit when the process receives
+	// SIGINT or SIGTERM. Without l.Kill() the per-launch temp directory
+	// ($TMPDIR/wuphf-launch-*) containing MCP configs and broker tokens
+	// would linger on disk after every Ctrl+C.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		sig := <-sigCh
 		_ = shareController.stop()
 		_ = tunnelController.stop()
+		_ = l.Kill()
 		// POSIX convention: a process killed by signal N exits with 128+N
 		// so process supervisors (systemd, npm, foreman) can distinguish a
 		// clean exit from an interrupted run. os.Exit(0) here would mask
